@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 
 using System;
+using System.Collections.Generic;
 namespace CCN_experiment;
 
 public class CCN_Game : Game
@@ -10,7 +11,8 @@ public class CCN_Game : Game
 	private enum State { Press_Start, Fixation, Stimulus_Presentation, Response_Window, Feedback, Final_Score };
 	private enum Stimulus { None, Left, Right };
 	private SpriteBatch _batch;
-	private int _timer, _score, _top_score, _rounds, _screen_width;
+	private int _timer, _score, _top_score, _screen_width;
+	private byte _rounds, _alt_stimulus_counter, _consec_stimulus_counter;
 	private Texture2D _patch, _checkerboard;
 	private SpriteFont _font;
 	private State _state;
@@ -19,9 +21,10 @@ public class CCN_Game : Game
 	private readonly Color _textColor, _backColor;
 	private Rectangle _cb_dest1, _cb_dest2, _fix_center, _progress, _p1, _p2, _p3;
 	private bool _profit;
+	private readonly HashSet<int> _leftRewards = new(), _rightRewards = new();
 	private readonly Random _rd;
-	private Stimulus _stimulus;
-	public const int Test_Unit = 3, Max_rounds = Test_Unit * 3;
+	private Stimulus _curStimulus, _prevStimulus;
+	public const byte Test_Unit = 12, Max_rounds = Test_Unit * 6, CounterLimit = 3;
 	public CCN_Game()
 	{
 		_graphics = new GraphicsDeviceManager(this);
@@ -30,6 +33,16 @@ public class CCN_Game : Game
 		_textColor = Color.Black;
 		_backColor = Color.White;
 		_rd = new();
+	}
+	public void FillRandom(HashSet<int> set)
+	{
+		int count = 0;
+		set.Clear();
+		do
+		{
+			if (set.Add(_rd.Next() % Max_rounds))
+				count++;
+		} while (count < Test_Unit);
 	}
 	/// <summary>
 	/// Sets rectangle a such that a and b share the same center
@@ -103,8 +116,11 @@ public class CCN_Game : Game
 					_rounds = 0;
 					_score = 0;
 					_state = State.Fixation;
-					_stimulus = Stimulus.None;
-					_helpMessage.Text = "Round 1";
+					_prevStimulus = _curStimulus = Stimulus.None;
+					_helpMessage.Text = $"Round 1/{Max_rounds}";
+					_alt_stimulus_counter = _consec_stimulus_counter = 0;
+					FillRandom(_leftRewards);
+					FillRandom(_rightRewards);
 				}
 				break;
 			case State.Fixation:
@@ -116,12 +132,12 @@ public class CCN_Game : Game
 					_state = State.Response_Window;
 				break;
 			case State.Response_Window:
-				if (_stimulus == Stimulus.None)
+				if (_curStimulus == Stimulus.None)
 				{
 					if (input.IsKeyDown(Keys.Left))
-						_stimulus = Stimulus.Left;
+						_curStimulus = Stimulus.Left;
 					else if (input.IsKeyDown(Keys.Right))
-						_stimulus = Stimulus.Right;
+						_curStimulus = Stimulus.Right;
 				}
 				if (_timer >= 3500)
 					_state = State.Feedback;
@@ -130,14 +146,34 @@ public class CCN_Game : Game
 				if (_timer >= 3750)
 				{
 					_rounds++;
-					_profit = _rd.Next(Max_rounds) < Test_Unit;
-					if (_profit)
+					if (_curStimulus != Stimulus.None)
 					{
-						_score += 20;
-						_top_score = _top_score > _score ? _top_score : _score;
+						if (_curStimulus == _prevStimulus)
+						{
+							_alt_stimulus_counter = 0;
+							_consec_stimulus_counter++;
+						}
+						else if (_prevStimulus != Stimulus.None)
+						{
+							_consec_stimulus_counter = 0;
+							_alt_stimulus_counter = 0;
+						}
+						else
+							_alt_stimulus_counter = _consec_stimulus_counter = 0;
+						HashSet<int> set = _curStimulus == Stimulus.Left ? _leftRewards : _rightRewards;
+						_profit = set.Contains(_rounds) && _alt_stimulus_counter < CounterLimit && _consec_stimulus_counter < CounterLimit;
+						if (_profit)
+						{
+							_score += 20;
+							_top_score = _top_score > _score ? _top_score : _score;
+						}
 					}
+					else
+						_alt_stimulus_counter = _consec_stimulus_counter = 0;
 					_scoreBoard.Text = $"Your score: {_score}    Top score: {_top_score}";
 					_timer = 0;
+					_prevStimulus = _curStimulus;
+					_curStimulus = Stimulus.None;
 					if (_rounds >= Max_rounds)
 					{
 						_state = State.Final_Score;
@@ -146,7 +182,7 @@ public class CCN_Game : Game
 					else
 					{
 						_state = State.Fixation;
-						_helpMessage.Text = $"Round {_rounds + 1}";
+						_helpMessage.Text = $"Round {_rounds + 1}/{Max_rounds}";
 					}
 				}
 				break;
