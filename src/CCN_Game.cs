@@ -4,6 +4,8 @@ using Microsoft.Xna.Framework.Input;
 
 using System;
 using System.Collections.Generic;
+using System.Text;
+
 namespace CCN_experiment;
 
 public class CCN_Game : Game
@@ -12,7 +14,7 @@ public class CCN_Game : Game
 	private enum Stimulus { None, Left, Right };
 	private SpriteBatch _batch;
 	private int _timer, _score, _top_score, _screen_width;
-	private byte _rounds, _alt_stimulus_counter, _consec_stimulus_counter;
+	private byte _rounds, _altern_stimulus_counter, _consec_stimulus_counter;
 	private Texture2D _patch, _checkerboard;
 	private SpriteFont _font;
 	private State _state;
@@ -22,9 +24,10 @@ public class CCN_Game : Game
 	private Rectangle _cb_dest1, _cb_dest2, _fix_center, _progress, _p1, _p2, _p3;
 	private bool _profit;
 	private readonly HashSet<int> _leftRewards = new(), _rightRewards = new();
-	private readonly Random _rd;
+	private readonly Random _randomGen;
 	private Stimulus _curStimulus, _prevStimulus;
-	public const byte Test_Unit = 12, Max_rounds = Test_Unit * 6, CounterLimit = 3;
+	public const byte Test_Unit = 2, Max_rounds = Test_Unit * 6, CounterLimit = 3;
+	private readonly StringBuilder _bdr = new();
 	public CCN_Game()
 	{
 		_graphics = new GraphicsDeviceManager(this);
@@ -32,7 +35,7 @@ public class CCN_Game : Game
 		IsMouseVisible = true;
 		_textColor = Color.Black;
 		_backColor = Color.White;
-		_rd = new();
+		_randomGen = new();
 	}
 	public void FillRandom(HashSet<int> set)
 	{
@@ -40,7 +43,7 @@ public class CCN_Game : Game
 		set.Clear();
 		do
 		{
-			if (set.Add(_rd.Next() % Max_rounds))
+			if (set.Add(_randomGen.Next() % Max_rounds))
 				count++;
 		} while (count < Test_Unit);
 	}
@@ -118,9 +121,10 @@ public class CCN_Game : Game
 					_state = State.Fixation;
 					_prevStimulus = _curStimulus = Stimulus.None;
 					_helpMessage.Text = $"Round 1/{Max_rounds}";
-					_alt_stimulus_counter = _consec_stimulus_counter = 0;
+					_altern_stimulus_counter = _consec_stimulus_counter = 0;
 					FillRandom(_leftRewards);
 					FillRandom(_rightRewards);
+					_bdr.Clear();
 				}
 				break;
 			case State.Fixation:
@@ -146,30 +150,54 @@ public class CCN_Game : Game
 				if (_timer >= 3750)
 				{
 					_rounds++;
+					_bdr.Append($"Round_{_rounds}:\tR = ");
+					if (_leftRewards.Contains(_rounds))
+						_bdr.Append("{ ( $");
+					else
+						_bdr.Append("{ ( _");
+					if (_rightRewards.Contains(_rounds))
+						_bdr.Append("| $");
+					else
+						_bdr.Append("| _");
+					_bdr.Append(" ), S = ");
 					if (_curStimulus != Stimulus.None)
 					{
+						if (_curStimulus == Stimulus.Left)
+							_bdr.Append("<-");
+						else
+							_bdr.Append("->");
 						if (_curStimulus == _prevStimulus)
 						{
-							_alt_stimulus_counter = 0;
+							_altern_stimulus_counter = 0;
 							_consec_stimulus_counter++;
 						}
 						else if (_prevStimulus != Stimulus.None)
 						{
 							_consec_stimulus_counter = 0;
-							_alt_stimulus_counter = 0;
+							_altern_stimulus_counter++;
 						}
 						else
-							_alt_stimulus_counter = _consec_stimulus_counter = 0;
+							_altern_stimulus_counter = _consec_stimulus_counter = 0;
 						HashSet<int> set = _curStimulus == Stimulus.Left ? _leftRewards : _rightRewards;
-						_profit = set.Contains(_rounds) && _alt_stimulus_counter < CounterLimit && _consec_stimulus_counter < CounterLimit;
+						_profit = set.Contains(_rounds) && _altern_stimulus_counter < CounterLimit && _consec_stimulus_counter < CounterLimit;
 						if (_profit)
 						{
 							_score += 20;
 							_top_score = _top_score > _score ? _top_score : _score;
+							_bdr.Append(" , P = +");
 						}
+						else if (set.Contains(_rounds))
+							_bdr.Append(" , P = -");
+						else
+							_bdr.Append(" , P = 0");
 					}
 					else
-						_alt_stimulus_counter = _consec_stimulus_counter = 0;
+					{
+						_altern_stimulus_counter = _consec_stimulus_counter = 0;
+						_bdr.Append(":: , P = 0");
+					}
+					_bdr.Append($"; (consec: {_consec_stimulus_counter}, altern: {_altern_stimulus_counter} )");
+					_bdr.Append(" }\n");
 					_scoreBoard.Text = $"Your score: {_score}    Top score: {_top_score}";
 					_timer = 0;
 					_prevStimulus = _curStimulus;
@@ -178,6 +206,7 @@ public class CCN_Game : Game
 					{
 						_state = State.Final_Score;
 						_helpMessage.Text = " ";
+						System.IO.File.WriteAllText($"{DateTime.Now:dd-mm-yy-hh-mm-ss}.log", _bdr.ToString());
 					}
 					else
 					{
