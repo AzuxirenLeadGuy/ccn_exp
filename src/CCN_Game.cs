@@ -11,31 +11,28 @@ namespace CCN_experiment;
 public class CCN_Game : Game
 {
 	private enum State { Press_Start, Fixation, Stimulus_Presentation, Response_Window, Feedback, Final_Score };
-	private enum Stimulus { None, Left, Right };
+	private enum Stimulus { None, Green, Red };
 	private SpriteBatch _batch;
 	private int _timer, _score, _top_score, _screen_width;
-	private byte _rounds, _altern_stimulus_counter, _consec_stimulus_counter;
+	private byte _rounds;
 	private Texture2D _patch, _checkerboard;
 	private SpriteFont _font;
 	private State _state;
 	private readonly GraphicsDeviceManager _graphics;
 	private TextBox _pressStart, _scoreBoard, _helpMessage;
-	private readonly Color _textColor, _backColor;
+	private readonly Color _textColor = Color.Black, _backColor = Color.White;
 	private Rectangle _cb_dest1, _cb_dest2, _fix_center, _progress, _p1, _p2, _p3;
-	private bool _profit;
-	private readonly HashSet<int> _leftRewards = new(), _rightRewards = new();
-	private readonly Random _randomGen;
+	private bool _profit, _shuffleRG, _alternate, _rewardOnRed, _rewardOnGreen;
+	private readonly HashSet<int> _redRewards = new(), _greenRewards = new();
+	private readonly Random _randomGen = new();
 	private Stimulus _curStimulus, _prevStimulus;
-	public const byte Test_Unit = 2, Max_rounds = Test_Unit * 6, CounterLimit = 3;
+	public const byte Test_Unit = 12, Max_rounds = Test_Unit * 6;
 	private readonly StringBuilder _bdr = new();
 	public CCN_Game()
 	{
 		_graphics = new GraphicsDeviceManager(this);
 		Content.RootDirectory = "Content";
 		IsMouseVisible = true;
-		_textColor = Color.Black;
-		_backColor = Color.White;
-		_randomGen = new();
 	}
 	public void FillRandom(HashSet<int> set)
 	{
@@ -43,15 +40,10 @@ public class CCN_Game : Game
 		set.Clear();
 		do
 		{
-			if (set.Add(_randomGen.Next() % Max_rounds))
+			if (set.Add(_randomGen.Next(Max_rounds)))
 				count++;
 		} while (count < Test_Unit);
 	}
-	/// <summary>
-	/// Sets rectangle a such that a and b share the same center
-	/// </summary>
-	/// <param name="a">The rectangle to shift</param>
-	/// <param name="center">The Point to be taken reference of</param>
 	public static Point SetCenter(ref Rectangle a, Point center)
 	{
 		a.X = center.X - (a.Width / 2);
@@ -118,18 +110,22 @@ public class CCN_Game : Game
 					_timer = 0;
 					_rounds = 0;
 					_score = 0;
-					_state = State.Fixation;
 					_prevStimulus = _curStimulus = Stimulus.None;
 					_helpMessage.Text = $"Round 1/{Max_rounds}";
-					_altern_stimulus_counter = _consec_stimulus_counter = 0;
-					FillRandom(_leftRewards);
-					FillRandom(_rightRewards);
+					_alternate = false;
+					FillRandom(_redRewards);
+					FillRandom(_greenRewards);
+					_rewardOnRed = _rewardOnGreen = false;
 					_bdr.Clear();
+					_state = State.Fixation;
 				}
 				break;
 			case State.Fixation:
 				if (_timer >= 1250)
+				{
+					_shuffleRG = _randomGen.Next(2) == 0;
 					_state = State.Stimulus_Presentation;
+				}
 				break;
 			case State.Stimulus_Presentation:
 				if (_timer >= 2250)
@@ -139,71 +135,82 @@ public class CCN_Game : Game
 				if (_curStimulus == Stimulus.None)
 				{
 					if (input.IsKeyDown(Keys.Left))
-						_curStimulus = Stimulus.Left;
+						_curStimulus = _shuffleRG ? Stimulus.Green : Stimulus.Red;
 					else if (input.IsKeyDown(Keys.Right))
-						_curStimulus = Stimulus.Right;
+						_curStimulus = _shuffleRG ? Stimulus.Red : Stimulus.Green;
+					_rewardOnGreen = _rewardOnGreen || _greenRewards.Contains(_rounds);
+					_rewardOnRed = _rewardOnRed || _redRewards.Contains(_rounds);
 				}
 				if (_timer >= 3500)
-					_state = State.Feedback;
-				break;
-			case State.Feedback:
-				if (_timer >= 3750)
 				{
-					_rounds++;
-					_bdr.Append($"Round_{_rounds}:\tR = ");
-					if (_leftRewards.Contains(_rounds))
+					_state = State.Feedback;
+					_bdr.Append($"Round_{_rounds}:\tR(R,G) = ");
+					if (_redRewards.Contains(_rounds))
 						_bdr.Append("{ ( $");
 					else
 						_bdr.Append("{ ( _");
-					if (_rightRewards.Contains(_rounds))
-						_bdr.Append("| $");
+					if(_rewardOnRed)
+						_bdr.Append('*');
 					else
-						_bdr.Append("| _");
+						_bdr.Append(' ');
+					if (_greenRewards.Contains(_rounds))
+						_bdr.Append(" | $");
+					else
+						_bdr.Append(" | _");
+					if(_rewardOnGreen)
+						_bdr.Append('*');
+					else
+						_bdr.Append(' ');
 					_bdr.Append(" ), S = ");
 					if (_curStimulus != Stimulus.None)
 					{
-						if (_curStimulus == Stimulus.Left)
-							_bdr.Append("<-");
+						if (_curStimulus == Stimulus.Green)
+							_bdr.Append("< Red >");
 						else
-							_bdr.Append("->");
-						if (_curStimulus == _prevStimulus)
+							_bdr.Append("<Green>");
+						_alternate = _prevStimulus != Stimulus.None && _curStimulus != _prevStimulus;
+						bool selectedReward;
+						if (_curStimulus == Stimulus.Red)
 						{
-							_altern_stimulus_counter = 0;
-							_consec_stimulus_counter++;
-						}
-						else if (_prevStimulus != Stimulus.None)
-						{
-							_consec_stimulus_counter = 0;
-							_altern_stimulus_counter++;
+							selectedReward = _rewardOnRed;
+							_rewardOnRed = false;
 						}
 						else
-							_altern_stimulus_counter = _consec_stimulus_counter = 0;
-						HashSet<int> set = _curStimulus == Stimulus.Left ? _leftRewards : _rightRewards;
-						_profit = set.Contains(_rounds) && _altern_stimulus_counter < CounterLimit && _consec_stimulus_counter < CounterLimit;
+						{
+							selectedReward = _rewardOnGreen;
+							_rewardOnGreen = false;
+						}
+						_profit = selectedReward && _alternate == false;
 						if (_profit)
 						{
 							_score += 20;
 							_top_score = _top_score > _score ? _top_score : _score;
 							_bdr.Append(" , P = +");
 						}
-						else if (set.Contains(_rounds))
+						else if (selectedReward)
 							_bdr.Append(" , P = -");
 						else
 							_bdr.Append(" , P = 0");
 					}
 					else
 					{
-						_altern_stimulus_counter = _consec_stimulus_counter = 0;
-						_bdr.Append(":: , P = 0");
+						_profit = false;
+						_bdr.Append("<Empty> , P = 0");
 					}
-					_bdr.Append($"; (consec: {_consec_stimulus_counter}, altern: {_altern_stimulus_counter} )");
+					_bdr.Append($"; (alternate penalty: {_alternate} )");
 					_bdr.Append(" }\n");
-					_scoreBoard.Text = $"Your score: {_score}    Top score: {_top_score}";
-					_timer = 0;
 					_prevStimulus = _curStimulus;
 					_curStimulus = Stimulus.None;
+				}
+				break;
+			case State.Feedback:
+				if (_timer >= 3750)
+				{
+					_rounds++;
+					_timer = 0;
 					if (_rounds >= Max_rounds)
 					{
+						_scoreBoard.Text = $"Your score: {_score}    Top score: {_top_score}";
 						_state = State.Final_Score;
 						_helpMessage.Text = " ";
 						System.IO.File.WriteAllText($"{DateTime.Now:dd-mm-yy-hh-mm-ss}.log", _bdr.ToString());
@@ -218,7 +225,6 @@ public class CCN_Game : Game
 		}
 		base.Update(gameTime);
 	}
-
 	protected override void Draw(GameTime gameTime)
 	{
 		GraphicsDevice.Clear(_backColor);
@@ -236,8 +242,16 @@ public class CCN_Game : Game
 				_pressStart.Draw(_batch);
 				break;
 			case State.Stimulus_Presentation:
-				_batch.Draw(_checkerboard, _cb_dest1, Color.Red);
-				_batch.Draw(_checkerboard, _cb_dest2, Color.Green);
+				if (!_shuffleRG)
+				{
+					_batch.Draw(_checkerboard, _cb_dest1, Color.Green);
+					_batch.Draw(_checkerboard, _cb_dest2, Color.Red);
+				}
+				else
+				{
+					_batch.Draw(_checkerboard, _cb_dest1, Color.Red);
+					_batch.Draw(_checkerboard, _cb_dest2, Color.Green);
+				}
 				goto case State.Fixation;
 			case State.Response_Window:
 			case State.Fixation:
